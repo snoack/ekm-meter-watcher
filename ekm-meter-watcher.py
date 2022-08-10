@@ -19,10 +19,24 @@ TIMEOUT = 10
 AGGREGATE_AFTER_WEEKS = 6
 AGGREGATE_BY_SECONDS = 3600
 
+def create_view(name, interval=None):
+    time = "STRFTIME('%s', time) - (interval >> 1)"
+    watts = "impulses * 3600 / 0.8 / interval"
+    group_by = ""
+
+    if interval is not None:
+        time = f"({time}) / {interval} * {interval} + {interval // 2}"
+        watts = f"AVG({watts})"
+        group_by = " GROUP BY ts"
+
+    return (f"CREATE VIEW IF NOT EXISTS {name} AS " +
+            f"SELECT {time} AS ts, {watts} AS watts " +
+            f"FROM usage{group_by};")
+
 def connect_db():
     logging.info("Opening SQLite database at %s", os.path.abspath(DATABASE))
     db = sqlite3.connect(DATABASE)
-    db.executescript("""
+    db.executescript(f"""
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS usage (
             time TIMESTAMP NOT NULL,
@@ -30,7 +44,10 @@ def connect_db():
             impulses INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS time on usage (time);
-        CREATE INDEX IF NOT EXISTS interval on usage (interval);""")
+        CREATE INDEX IF NOT EXISTS interval on usage (interval);
+        {create_view("view_realtime")}
+        {create_view("view_5m", 300)}
+        {create_view("view_1h", 3600)}""")
     return db
 
 def acquire_lock():
