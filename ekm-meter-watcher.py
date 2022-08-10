@@ -6,8 +6,9 @@ import sys
 import time
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+import signal
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pigpio
 
@@ -51,8 +52,10 @@ def watch():
     last_check = time.monotonic()
     last_tally = 0
 
+    signal.signal(signal.SIGTERM, lambda sig, frame: None)
+
     while True:
-        time.sleep(TIMEOUT)
+        siginfo = signal.sigtimedwait([signal.SIGTERM, signal.SIGINT], TIMEOUT)
         this_check = time.monotonic()
         this_tally = cb.tally()
         interval = this_check - last_check
@@ -65,7 +68,12 @@ def watch():
             last_check = this_check
             last_tally = this_tally
         except sqlite3.OperationalError as e:
-            logging.warning("SQLite: %s, postponing update", e)
+            logging.warning("SQLite: %s%s", e, ", postponing update" if not siginfo else "")
+
+        if siginfo:
+            sig = signal.Signals(siginfo.si_signo).name
+            logging.info("Terminating after receiving signal %s", sig)
+            break
 
 def aggregate():
     logging.info("Combining records older than %s weeks into %s second " +
