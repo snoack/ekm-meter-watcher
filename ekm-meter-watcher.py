@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pigpio
 
@@ -20,7 +20,7 @@ AGGREGATE_AFTER_WEEKS = 6
 AGGREGATE_BY_SECONDS = 3600
 
 def create_view(name, interval=None):
-    time = "STRFTIME('%s', time) - (interval >> 1)"
+    time = "timestamp - (interval >> 1)"
     watts = "impulses * 3600 / 0.8 / interval"
     group_by = ""
 
@@ -39,11 +39,11 @@ def connect_db():
     db.executescript(f"""
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS usage (
-            time TIMESTAMP NOT NULL,
+            timestamp INTEGER NOT NULL,
             interval REAL NOT NULL,
             impulses INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS time on usage (time);
+        CREATE INDEX IF NOT EXISTS timestamp on usage (timestamp);
         CREATE INDEX IF NOT EXISTS interval on usage (interval);
         {create_view("view_realtime")}
         {create_view("view_5m", 300)}
@@ -79,8 +79,8 @@ def watch():
         impulses = this_tally - last_tally
 
         try:
-            with db: db.execute("INSERT INTO usage (time, interval, impulses) " +
-                                "VALUES (DATETIME(), ?, ?)", (interval, impulses))
+            with db: db.execute("INSERT INTO usage (timestamp, interval, impulses) " +
+                                "VALUES (STRFTIME('%s', 'now'), ?, ?)", (interval, impulses))
             logging.info("Recorded %s impulses in %s seconds", impulses, interval)
             last_check = this_check
             last_tally = this_tally
@@ -96,13 +96,13 @@ def aggregate():
     logging.info("Combining records older than %s weeks into %s second " +
                  "intervals", AGGREGATE_AFTER_WEEKS, AGGREGATE_BY_SECONDS)
 
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(weeks=AGGREGATE_AFTER_WEEKS)
-    round_up_time = "DATETIME((STRFTIME('%s', time) / ?1 + 1) * ?1, 'unixepoch')"
+    round_up_time = "(timestamp / ?1 + 1) * ?1"
+    cutoff = (datetime.now() - timedelta(weeks=AGGREGATE_AFTER_WEEKS)).timestamp()
     params = (AGGREGATE_BY_SECONDS, cutoff)
 
     with connect_db() as db:
         cursor = db.cursor()
-        cursor.execute("INSERT INTO usage (time, interval, impulses) " +
+        cursor.execute("INSERT INTO usage (timestamp, interval, impulses) " +
                        "SELECT {} AS time_rounded_up, ?1, SUM(impulses) ".format(round_up_time) +
                        "FROM usage WHERE interval < ?1 AND time_rounded_up < ?2 " +
                        "GROUP BY time_rounded_up", params)
