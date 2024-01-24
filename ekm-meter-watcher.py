@@ -37,7 +37,6 @@ def connect_db():
     logging.info("Opening SQLite database at %s", os.path.abspath(DATABASE))
     db = sqlite3.connect(DATABASE)
     db.executescript(f"""
-        PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS usage (
             timestamp INTEGER NOT NULL,
             interval REAL NOT NULL,
