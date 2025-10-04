@@ -11,7 +11,7 @@ WATCHER_LOG=watcher.log
 CRON_LOG=cron.log
 
 echo "Installing dependencies..."
-sudo apt-get install -y pigpio python3-pigpio sqlite3
+sudo apt-get install -y python3-libgpiod sqlite3
 
 echo "Creating $CWD directory..."
 mkdir -p $CWD
@@ -31,7 +31,6 @@ sudo -s << EOS
 cat << EOF > /etc/systemd/system/$NAME.service
 [Unit]
 Description=Script that records impulses from EKM meter via GPIO
-Requires=pigpiod.service
 [Service]
 User=$USER
 WorkingDirectory=$CWD

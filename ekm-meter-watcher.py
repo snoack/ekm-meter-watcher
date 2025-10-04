@@ -10,7 +10,8 @@ import signal
 import sqlite3
 from datetime import datetime, timedelta
 
-import pigpio
+import gpiod
+from gpiod.line import Edge, Bias
 
 DATABASE = "db"
 LOCKFILE = "lock"
@@ -49,47 +50,53 @@ def connect_db():
         {create_view("view_1h", 3600)}""")
     return db
 
-def acquire_lock():
-    fd = os.open(LOCKFILE, os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except IOError:
-        sys.exit("It seems another instance is already running")
-
-def watch():
-    acquire_lock()
-
-    pi = pigpio.pi()
-    if not pi.connected:
-        sys.exit(1)
-
-    db = connect_db()
-    cb = pi.callback(GPIO)
-    last_check = time.monotonic()
-    last_tally = 0
-
-    signal.signal(signal.SIGTERM, lambda sig, frame: None)
-
-    while True:
-        siginfo = signal.sigtimedwait([signal.SIGTERM, signal.SIGINT], TIMEOUT)
-        this_check = time.monotonic()
-        this_tally = cb.tally()
-        interval = this_check - last_check
-        impulses = this_tally - last_tally
-
+class Watcher:
+    def acquire_lock(self):
+        fd = os.open(LOCKFILE, os.O_CREAT, 0o644)
         try:
-            with db: db.execute("INSERT INTO usage (timestamp, interval, impulses) " +
-                                "VALUES (STRFTIME('%s', 'now'), ?, ?)", (interval, impulses))
-            logging.info("Recorded %s impulses in %s seconds", impulses, interval)
-            last_check = this_check
-            last_tally = this_tally
-        except sqlite3.OperationalError as e:
-            logging.warning("SQLite: %s%s", e, ", postponing update" if not siginfo else "")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError:
+            sys.exit("It seems another instance is already running")
 
-        if siginfo:
-            sig = signal.Signals(siginfo.si_signo).name
-            logging.info("Terminating after receiving signal %s", sig)
-            break
+    def record_data(self, terminating=False):
+        now = self.last_write_attempt = time.monotonic()
+        interval = now - self.last_write_success
+        try:
+            with self.db as db:
+                db.execute("INSERT INTO usage (timestamp, interval, impulses) " +
+                           "VALUES (STRFTIME('%s', 'now'), ?, ?)", (interval, self.impulses))
+            logging.info("Recorded %s impulses in %s seconds", self.impulses, interval)
+            self.last_write_success = self.last_write_attempt
+            self.impulses = 0
+        except sqlite3.OperationalError as e:
+            logging.warning("SQLite: %s%s", e, "" if terminating else ", postponing update")
+
+    def signal_handler(self, sig, frame):
+        logging.info("Terminating after receiving signal %s", signal.Signals(sig).name)
+        self.record_data(terminating=True)
+        sys.exit(0)
+
+    def run(self):
+        self.acquire_lock()
+
+        line_request = gpiod.request_lines(
+            "/dev/gpiochip4",
+            consumer="ekm-meter-watcher",
+            config={GPIO: gpiod.LineSettings(edge_detection=Edge.RISING, bias=Bias.DISABLED)}
+        )
+
+        self.db = connect_db()
+        self.last_write_attempt = self.last_write_success = time.monotonic()
+        self.impulses = 0
+
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGINT, self.signal_handler)
+
+        while True:
+            while line_request.wait_edge_events(max(0, self.last_write_attempt +
+                                                       TIMEOUT - time.monotonic())):
+                self.impulses += len(line_request.read_edge_events())
+            self.record_data()
 
 def aggregate():
     logging.info("Combining records older than %s weeks into %s second " +
@@ -120,4 +127,4 @@ if __name__ == "__main__":
     if args.aggregate:
         aggregate()
     else:
-        watch()
+        Watcher().run()
