@@ -39,3 +39,22 @@ docker compose up -d
 ```
 
 The host still needs to expose the GPIO character device you map in `devices`.
+
+## Wiring
+
+By default the watcher reads pulses from GPIO `27`, which is physical pin `13`
+on the Raspberry Pi. If using a different GPIO pin set `EKM_GPIO` accordingly.
+
+The EKM meter pulse output behaves like a switch that closes and opens `800`
+times per kWh used. Wire it like this:
+
+<img src="doc/wiring-schematic.svg" alt="Wiring schematic" width="100%">
+
+1. Supply `3.3 V` from the Pi to the meter.
+2. Put a `1 kOhm` resistor in series with the input GPIO pin to limit current.
+3. Add a `10 kOhm` pull-down resistor on the GPIO input, on the meter side of
+   the `1 kOhm` resistor.
+4. Connect the meter pulse output to the GPIO input.
+
+The script requests the GPIO line with bias disabled, so the external pull-down
+is required.
