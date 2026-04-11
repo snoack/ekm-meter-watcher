@@ -15,10 +15,11 @@ from gpiod.line import Edge, Bias
 
 DATABASE = "db"
 LOCKFILE = "lock"
-GPIO = 27
-TIMEOUT = 10
-AGGREGATE_AFTER_WEEKS = 6
-AGGREGATE_BY_SECONDS = 3600
+GPIO_CHIP = "/dev/gpiochip4"
+GPIO = int(os.environ.get("EKM_GPIO", 27))
+TIMEOUT = float(os.environ.get("EKM_TIMEOUT", 10))
+AGGREGATE_AFTER_WEEKS = int(os.environ.get("EKM_AGGREGATE_AFTER_WEEKS", 6))
+AGGREGATE_BY_SECONDS = int(os.environ.get("EKM_AGGREGATE_BY_SECONDS", 3600))
 
 def create_view(name, interval=None):
     time = "timestamp - (interval >> 1)"
@@ -79,8 +80,9 @@ class Watcher:
     def run(self):
         self.acquire_lock()
 
+        logging.info("Listening for pulses on %s line %s", GPIO_CHIP, GPIO)
         line_request = gpiod.request_lines(
-            "/dev/gpiochip4",
+            GPIO_CHIP,
             consumer="ekm-meter-watcher",
             config={GPIO: gpiod.LineSettings(edge_detection=Edge.RISING, bias=Bias.DISABLED)}
         )
