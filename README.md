@@ -25,6 +25,7 @@ services:
     #   EKM_LOG_LEVEL: WARNING
     #   EKM_AGGREGATE_AFTER_WEEKS: "6"
     #   EKM_AGGREGATE_BY_SECONDS: "3600"
+    #   EKM_AGGREGATE_INTERVAL: "86400"
     volumes:
       - ./data:/data
 ```
