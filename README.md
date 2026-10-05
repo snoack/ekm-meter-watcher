@@ -26,6 +26,14 @@ services:
     #   EKM_AGGREGATE_AFTER_WEEKS: "6"
     #   EKM_AGGREGATE_BY_SECONDS: "3600"
     #   EKM_AGGREGATE_INTERVAL: "86400"
+    #   EKM_MQTT_HOST: ""
+    #   EKM_MQTT_PORT: "1883"
+    #   EKM_MQTT_USERNAME: ""
+    #   EKM_MQTT_PASSWORD: ""
+    #   EKM_MQTT_TOPIC: ekm_meter
+    #   EKM_MQTT_DISCOVERY_PREFIX: homeassistant
+    #   EKM_ENERGY_INTERVAL: "60"
+    #   EKM_POWER_TIMEOUT: "300"
     volumes:
       - ./data:/data
 ```
@@ -40,6 +48,25 @@ docker compose up -d
 ```
 
 The host still needs to expose the GPIO character device you map in `devices`.
+
+## Home Assistant
+
+Readings are always logged to SQLite. If `EKM_MQTT_HOST` is set, they are
+also published to that MQTT broker, and Home Assistant picks them up through
+MQTT discovery as an "EKM meter" device with two sensors:
+
+- **Energy** (`kWh`): the total of all pulses in the database. Add it under
+  *Settings → Dashboards → Energy* as grid consumption.
+- **Power** (`W`): the average over the pulses since the previous update,
+  measured from pulse to pulse. While no pulse arrives it decays to the
+  highest power still consistent with the time since the last one, and drops
+  to `0` after `EKM_POWER_TIMEOUT` seconds.
+
+Power is updated after every database write, i.e. every `EKM_TIMEOUT` seconds,
+energy every `EKM_ENERGY_INTERVAL` seconds.
+
+Both are published under `EKM_MQTT_TOPIC`, along with an availability topic
+that marks the sensors unavailable while the watcher isn't running.
 
 ## Wiring
 
