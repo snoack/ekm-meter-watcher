@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # Rebuilt twice a month even without a commit, so the image picks up fixes
+  # to its base image and to the packages installed on top of it. The same
+  # dates in every repo, so images sharing a base pull the same version of it.
+  schedule:
+    - cron: '17 7 1,15 * *'
 
 permissions:
   contents: read
@@ -15,6 +20,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # GitHub disables a public repository's scheduled workflows after 60 days
+  # without activity, which is exactly when the scheduled rebuild matters.
+  # Re-enabling the workflow from its own scheduled run keeps it alive.
+  keepalive:
+    if: github.repository == 'snoack/ekm-meter-watcher' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/publish-ghcr.yml/enable"
+
   publish:
     if: github.repository == 'snoack/ekm-meter-watcher'
     runs-on: ubuntu-latest
@@ -56,3 +75,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # A rebuild without a commit is for the updates the cache would
+          # otherwise hide: an unchanged base would reuse the apt layer.
+          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
